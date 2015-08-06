@@ -10,6 +10,7 @@ public:
   ~FileSystemModel();
 
   void setRoot(QString const & rootPath);
+  bool isDir(QModelIndex const & index);
 
   int rowCount(QModelIndex const & parent) const override;
   int columnCount(QModelIndex const & parent) const override;

@@ -81,8 +81,7 @@ void setRootImpl(Node * root, int depth)
   if (depth > 4)
     return;
 
-  QFileInfo const & info = root->GetInfo();
-  QDirIterator iter(info.absoluteFilePath());
+  QDirIterator iter(root->GetInfo().absoluteFilePath());
   while (iter.hasNext())
   {
     iter.next();
@@ -90,8 +89,9 @@ void setRootImpl(Node * root, int depth)
     QString fileName = info.fileName();
     if (fileName != "." && fileName != "..")
     {
-      root->AddChild(iter.fileInfo());
-      setRootImpl(root->GetLastChild(), depth + 1);
+      root->AddChild(info);
+      if (info.isDir())
+        setRootImpl(root->GetLastChild(), depth + 1);
     }
   }
 }
@@ -172,6 +172,14 @@ public:
     return false;
   }
 
+  bool isDir(Node * node)
+  {
+    if (node == nullptr)
+      return false;
+
+    return node->GetInfo().isDir();
+  }
+
 private:
   using TFieldGetter = function<QVariant (Node const *)>;
   void addField(TFieldGetter const & getter, QString const & name)
@@ -214,6 +222,11 @@ void FileSystemModel::setRoot(QString const & rootPath)
   endResetModel();
 }
 
+bool FileSystemModel::isDir(QModelIndex const & index)
+{
+  return s_helper.isDir(static_cast<Node *>(index.internalPointer()));
+}
+
 int FileSystemModel::rowCount(QModelIndex const & parent) const
 {
   if (!parent.isValid())
@@ -235,7 +248,7 @@ QModelIndex FileSystemModel::index(int row, int column, QModelIndex const & pare
   if (node == nullptr)
     return createIndex(row, column, ROOT.get());
 
-  return createIndex(row, column, ROOT->GetChild(row));
+  return createIndex(row, column, node->GetChild(row));
 }
 
 QModelIndex FileSystemModel::parent(QModelIndex const & child) const
