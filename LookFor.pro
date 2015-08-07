@@ -23,3 +23,6 @@ HEADERS  += mainwindow.hpp \
     file_system_model.hpp
 
 FORMS    += mainwindow.ui
+
+RESOURCES += \
+    assets.qrc

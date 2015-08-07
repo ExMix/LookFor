@@ -10,9 +10,12 @@ MainWindow::MainWindow(QWidget *parent)
   : QMainWindow(parent)
   , ui(new Ui::MainWindow)
 {
+  QString styleSheet = "background-color:#fdfde6;";
+  m_model = new FileSystemModel(this);
+
   ui->setupUi(this);
 
-  m_model = new FileSystemModel(this);
+  ui->m_rootEditor->setStyleSheet(styleSheet);
 
   ui->m_fileTree->setModel(m_model);
   ui->m_fileTree->setHeaderHidden(true);
@@ -20,11 +23,13 @@ MainWindow::MainWindow(QWidget *parent)
 
   for (int i = 1; i < m_model->columnCount(QModelIndex()); ++i)
     ui->m_fileTree->hideColumn(i);
+  ui->m_fileTree->setStyleSheet(styleSheet);
 
   ui->m_fileTable->setModel(m_model);
   ui->m_fileTable->setSelectionMode(QAbstractItemView::SingleSelection);
   ui->m_fileTable->setRootIndex(QModelIndex());
   ui->m_fileTable->verticalHeader()->hide();
+  ui->m_fileTable->setStyleSheet(styleSheet);
 
   QHeaderView * tableHeader = ui->m_fileTable->horizontalHeader();
   tableHeader->resizeSections(QHeaderView::Interactive);

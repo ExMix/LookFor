@@ -3,6 +3,7 @@
 
 #include <QFileInfo>
 #include <QDirIterator>
+#include <QIcon>
 
 namespace
 {
@@ -23,7 +24,9 @@ public:
 
   void AddChild(QFileInfo const & info)
   {
-    m_children.emplace_back(new Node(info, this));
+    m_children.emplace_back(new Node(info, this, m_children.size()));
+    if (m_checkState != Qt::Unchecked)
+      m_children.back()->SetCheckState(Qt::Checked);
   }
 
   Node * GetParent() const
@@ -63,22 +66,31 @@ public:
     m_checkState = state;
   }
 
+  int GetChildIndex() const
+  {
+    return m_childIndex;
+  }
+
 private:
-  Node(QFileInfo const & info, Node * parent)
+  Node(QFileInfo const & info, Node * parent, int childIndex)
     : m_info(info)
     , m_parent(parent)
+    , m_childIndex(childIndex)
   {
   }
 
   QFileInfo m_info;
   Qt::CheckState m_checkState = Qt::Unchecked;
+
   Node * m_parent = nullptr;
+  int m_childIndex = 0;
+
   std::vector<std::unique_ptr<Node> > m_children;
 };
 
 void setRootImpl(Node * root, int depth)
 {
-  if (depth > 4)
+  if (depth > 2)
     return;
 
   QDirIterator iter(root->GetInfo().absoluteFilePath());
@@ -126,15 +138,34 @@ QVariant getCheckState(Node const * node)
   return node->GetCheckState();
 }
 
+QVariant getIcon(Node const * node)
+{
+  static QIcon rootIcon(QStringLiteral(":/assets/root.png"));
+  static QIcon folderIcon(QStringLiteral(":/assets/folder.png"));
+  static QIcon fileIcon(QStringLiteral(":/assets/file.png"));
+
+  QFileInfo const & info = node->GetInfo();
+  QString path;
+  if (info.isRoot())
+    return rootIcon;
+  else if (info.isDir())
+    return folderIcon;
+
+  return fileIcon;
+}
+
 class FieldHelper
 {
+  using TFieldGetter = function<QVariant (Node const *)>;
+  using TStateGetters = QHash<int, TFieldGetter>;
 public:
   FieldHelper()
   {
     addField(bind(&getName, _1), "Name");
     addField(bind(&getSize, _1), "Size");
 
-    m_stateGetters.push_back(bind(&getCheckState, _1));
+    m_stateGetters[Qt::CheckStateRole] = bind(&getCheckState, _1);
+    m_stateGetters[Qt::DecorationRole] = bind(&getIcon, _1);
   }
 
   int getFieldCount() const
@@ -146,8 +177,12 @@ public:
   {
     if (role == Qt::DisplayRole)
       return m_fieldGetters[column](node);
-    else if (role == Qt::CheckStateRole && column == 0)
-      return m_stateGetters[0](node);
+    else if (column == 0)
+    {
+      TStateGetters::const_iterator fn = m_stateGetters.find(role);
+      if (fn != m_stateGetters.end())
+        return fn.value()(node);
+    }
 
     return QVariant();
   }
@@ -161,12 +196,22 @@ public:
     return m_fieldNames[section];
   }
 
-  bool setFieldValue(Node * node, QVariant const & v, int column, int role) const
+  using TRange = std::pair<int, int>;
+  using TDataChanged = function<void (Node * parent, TRange const & rowRange,
+                                      TRange const & columnRange, int role)>;
+
+  bool setFieldValue(Node * node, QVariant const & v, int column, int role, TDataChanged const & fn) const
   {
     if (role == Qt::CheckStateRole && column == 0)
     {
       Q_ASSERT(v.canConvert<int>());
-      node->SetCheckState((Qt::CheckState)v.value<int>());
+      Qt::CheckState state = (Qt::CheckState)v.value<int>();
+      node->SetCheckState(state);
+
+      setCheckStateForChildren(node, state, fn);
+      setCheckStateForParent(node, state, fn);
+
+      return true;
     }
 
     return false;
@@ -181,7 +226,46 @@ public:
   }
 
 private:
-  using TFieldGetter = function<QVariant (Node const *)>;
+  void setCheckStateForChildren(Node * parent, Qt::CheckState state, TDataChanged const & fn) const
+  {
+    int childCount = static_cast<int>(parent->GetChildCount());
+    for (int i = 0; i < childCount; ++i)
+    {
+      Node * child = parent->GetChild(i);
+      child->SetCheckState(state);
+      setCheckStateForChildren(child, state, fn);
+    }
+
+    fn(parent, std::make_pair(0, childCount - 1), std::make_pair(0, 0), Qt::CheckStateRole);
+  }
+
+  void setCheckStateForParent(Node * node, Qt::CheckState state, TDataChanged const & fn) const
+  {
+    Node * parent = node->GetParent();
+
+    int childIndex = node->GetChildIndex();
+    fn(node, std::make_pair(childIndex, childIndex), std::make_pair(0, 0), Qt::CheckStateRole);
+
+    if (parent == nullptr)
+      return;
+
+    if (state != Qt::PartiallyChecked)
+    {
+      for (size_t i = 0; i < parent->GetChildCount(); ++i)
+      {
+        if (parent->GetChild(i)->GetCheckState() != state)
+        {
+          state = Qt::PartiallyChecked;
+          break;
+        }
+      }
+    }
+
+    parent->SetCheckState(state);
+    setCheckStateForParent(parent, state, fn);
+  }
+
+private:
   void addField(TFieldGetter const & getter, QString const & name)
   {
     Q_ASSERT(m_fieldGetters.size() == m_fieldNames.size());
@@ -192,7 +276,7 @@ private:
 private:
   std::vector<TFieldGetter> m_fieldGetters;
   std::vector<QString> m_fieldNames;
-  std::vector<TFieldGetter> m_stateGetters;
+  TStateGetters m_stateGetters;
 };
 
 static FieldHelper s_helper;
@@ -257,7 +341,6 @@ QModelIndex FileSystemModel::parent(QModelIndex const & child) const
   if (childNode == nullptr)
     return QModelIndex();
 
-
   Node * parent = childNode->GetParent();
   if (parent == nullptr)
     return QModelIndex();
@@ -276,7 +359,21 @@ bool FileSystemModel::setData(QModelIndex const & index, QVariant const & value,
 {
   Q_ASSERT(index.internalPointer() != nullptr);
   Node * node = static_cast<Node *>(index.internalPointer());
-  return s_helper.setFieldValue(node, value, index.column(), role);
+
+  auto dataChangedSlot = [this](Node * parent, FieldHelper::TRange const & rowRange,
+                                FieldHelper::TRange const & columnRange, int role)
+  {
+    if (rowRange.second - rowRange.first < 0 ||
+        columnRange.second - columnRange.first)
+      return;
+
+    QModelIndex from = createIndex(rowRange.first, columnRange.first, parent);
+    QModelIndex to = createIndex(rowRange.second, columnRange.second, parent);
+
+    emitDataChanged(from, to, role);
+  };
+
+  return s_helper.setFieldValue(node, value, index.column(), role, dataChangedSlot);
 }
 
 QVariant FileSystemModel::headerData(int section, Qt::Orientation orientation, int role) const
@@ -292,9 +389,13 @@ Qt::ItemFlags FileSystemModel::flags(QModelIndex const & index) const
   Qt::ItemFlags flags = Qt::ItemIsSelectable | Qt::ItemIsEnabled;
   if (index.column() == 0)
     flags |= Qt::ItemIsUserCheckable;
-//  if (rowCount(index) > 0)
-//    flags |= Qt::ItemIsTristate;
 
   return flags;
+}
+
+void FileSystemModel::emitDataChanged(QModelIndex const & from, QModelIndex const & to, int role)
+{
+  Q_ASSERT(from.parent() == to.parent());
+  emit dataChanged(from, to, QVector<int>{ role });
 }
 

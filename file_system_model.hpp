@@ -25,6 +25,9 @@ public:
   Q_SIGNAL void subtreeSelected(QModelIndex const & index);
 
 private:
+  void emitDataChanged(QModelIndex const & from, QModelIndex const & to, int role);
+
+private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
 };
