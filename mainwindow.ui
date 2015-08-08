@@ -88,7 +88,7 @@
      </layout>
     </item>
     <item>
-     <widget class="QSplitter" name="splitter">
+     <widget class="QSplitter" name="m_splitter">
       <property name="sizePolicy">
        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
         <horstretch>0</horstretch>
@@ -117,7 +117,19 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="contextMenuPolicy">
+        <enum>Qt::ActionsContextMenu</enum>
+       </property>
        <property name="autoFillBackground">
+        <bool>true</bool>
+       </property>
+       <property name="uniformRowHeights">
+        <bool>true</bool>
+       </property>
+       <property name="animated">
+        <bool>true</bool>
+       </property>
+       <property name="headerHidden">
         <bool>true</bool>
        </property>
       </widget>
@@ -128,9 +140,33 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="contextMenuPolicy">
+        <enum>Qt::ActionsContextMenu</enum>
+       </property>
        <property name="autoFillBackground">
         <bool>true</bool>
        </property>
+       <property name="alternatingRowColors">
+        <bool>true</bool>
+       </property>
+       <property name="selectionMode">
+        <enum>QAbstractItemView::SingleSelection</enum>
+       </property>
+       <property name="selectionBehavior">
+        <enum>QAbstractItemView::SelectRows</enum>
+       </property>
+       <property name="showGrid">
+        <bool>false</bool>
+       </property>
+       <attribute name="horizontalHeaderCascadingSectionResizes">
+        <bool>true</bool>
+       </attribute>
+       <attribute name="horizontalHeaderStretchLastSection">
+        <bool>true</bool>
+       </attribute>
+       <attribute name="verticalHeaderVisible">
+        <bool>false</bool>
+       </attribute>
       </widget>
      </widget>
     </item>

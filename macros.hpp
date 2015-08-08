@@ -2,7 +2,7 @@
 
 #include <QtGlobal>
 
-#ifdef DEBUG
+#ifdef QT_DEBUG
   #define VERIFY(x) Q_ASSERT(x)
 #else
   #define VERIFY(x) x
@@ -11,8 +11,6 @@
 #include <functional>
 using std::bind;
 using std::function;
-//using std::ref;
-//using std::cref;
 using std::placeholders::_1;
 using std::placeholders::_2;
 using std::placeholders::_3;

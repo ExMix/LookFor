@@ -1,0 +1,7 @@
+.QLineEdit, .QTreeView, .QTableView, .QMenu {
+  background-color:#fdfde6;
+}
+
+QMenu::item:selected {
+  background-color:blue;
+}

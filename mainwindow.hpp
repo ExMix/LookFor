@@ -3,7 +3,7 @@
 #include "file_system_model.hpp"
 
 #include <QMainWindow>
-#include <QItemSelectionModel>
+#include <QSortFilterProxyModel>
 
 namespace Ui
 {
@@ -21,16 +21,24 @@ public:
   ~MainWindow();
 
 private:
+  void LoadState();
+  void SaveState();
+
+private:
   Q_SLOT void onRootDialogCall();
   Q_SLOT void onRootSpecified();
 
   Q_SLOT void onTreeSelectionChanged(QItemSelection const & selected, QItemSelection const & deselected);
   Q_SLOT void onTableSelectionChanged(QItemSelection const & selected, QItemSelection const & deselected);
 
-  Q_SLOT void onTableHeaderClicked(int index);
+  Q_SLOT void onResizeColumns();
+  Q_SLOT void onSetRegExp();
 
 private:
-  Ui::MainWindow * ui;
+  Ui::MainWindow * m_ui;
 
-  FileSystemModel * m_model;
+  FileSystemModel * m_fileModel;
+  QSortFilterProxyModel * m_model;
+
+  bool m_ignoreTableSelection;
 };

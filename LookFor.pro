@@ -16,13 +16,20 @@ CONFIG += c++11
 
 SOURCES += main.cpp\
         mainwindow.cpp \
-    file_system_model.cpp
+    file_system_model.cpp \
+    proxy_item_delegate.cpp \
+    dir_scaner.cpp \
+    reg_exp_dialog.cpp
 
 HEADERS  += mainwindow.hpp \
     macros.hpp \
-    file_system_model.hpp
+    file_system_model.hpp \
+    proxy_item_delegate.hpp \
+    dir_scaner.hpp \
+    reg_exp_dialog.hpp
 
-FORMS    += mainwindow.ui
+FORMS    += mainwindow.ui \
+    regexpdialog.ui
 
 RESOURCES += \
     assets.qrc

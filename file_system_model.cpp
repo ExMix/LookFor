@@ -1,9 +1,11 @@
 #include "file_system_model.hpp"
 #include "macros.hpp"
+#include "dir_scaner.hpp"
 
 #include <QFileInfo>
-#include <QDirIterator>
 #include <QIcon>
+#include <QDateTime>
+#include <QThreadPool>
 
 namespace
 {
@@ -71,6 +73,23 @@ public:
     return m_childIndex;
   }
 
+  enum EScanStatus
+  {
+    NotScaned,
+    Running,
+    Finished
+  };
+
+  EScanStatus GetStatus() const
+  {
+    return m_status;
+  }
+
+  void SetStatus(EScanStatus status)
+  {
+    m_status = status;
+  }
+
 private:
   Node(QFileInfo const & info, Node * parent, int childIndex)
     : m_info(info)
@@ -84,38 +103,51 @@ private:
 
   Node * m_parent = nullptr;
   int m_childIndex = 0;
+  EScanStatus m_status = NotScaned;
 
   std::vector<std::unique_ptr<Node> > m_children;
 };
-
-void setRootImpl(Node * root, int depth)
-{
-  if (depth > 2)
-    return;
-
-  QDirIterator iter(root->GetInfo().absoluteFilePath());
-  while (iter.hasNext())
-  {
-    iter.next();
-    QFileInfo info = iter.fileInfo();
-    QString fileName = info.fileName();
-    if (fileName != "." && fileName != "..")
-    {
-      root->AddChild(info);
-      if (info.isDir())
-        setRootImpl(root->GetLastChild(), depth + 1);
-    }
-  }
-}
 
 } // namespace
 
 struct FileSystemModel::Impl
 {
-  std::unique_ptr<Node> m_root;
-};
+  Impl(FileSystemModel * model)
+    : m_model(model)
+  {
+  }
 
-#define ROOT m_impl->m_root
+  FileSystemModel * m_model;
+  std::unique_ptr<Node> m_root;
+
+  void RunScaner(Node * node)
+  {
+    if (node->GetInfo().isDir())
+    {
+      node->SetStatus(Node::Running);
+      DirScaner * scaner = CreateScaner(node->GetInfo());
+      m_scanerIndex.insert(std::make_pair(scaner, node));
+      QThreadPool::globalInstance()->start(scaner);
+    }
+    else
+      node->SetStatus(Node::Finished);
+  }
+
+  DirScaner * CreateScaner(QFileInfo const & info)
+  {
+    DirScaner * scaner = new DirScaner(info.absoluteFilePath());
+    VERIFY(QObject::connect(scaner, &DirScaner::fileFounded,
+                            m_model, &FileSystemModel::fileFounded, Qt::QueuedConnection));
+    VERIFY(QObject::connect(scaner, &DirScaner::scanFinished,
+                            m_model, &FileSystemModel::scanFinished, Qt::QueuedConnection));
+    scaner->setAutoDelete(true);
+
+    return scaner;
+  }
+
+  using TScanerIndex = std::map<DirScaner *, Node *>;
+  TScanerIndex m_scanerIndex;
+};
 
 QVariant getName(Node const * node)
 {
@@ -133,6 +165,26 @@ QVariant getSize(Node const * node)
   return info.size();
 }
 
+QVariant getCreatedTime(Node const * node)
+{
+  return node->GetInfo().created();
+}
+
+QVariant getModifiedTime(Node const * node)
+{
+  return node->GetInfo().lastModified();
+}
+
+QVariant getOwner(Node const * node)
+{
+  return node->GetInfo().owner();
+}
+
+QVariant getPremission(Node const * node)
+{
+  return QString::number(static_cast<int>(node->GetInfo().permissions()), 16);
+}
+
 QVariant getCheckState(Node const * node)
 {
   return node->GetCheckState();
@@ -145,7 +197,6 @@ QVariant getIcon(Node const * node)
   static QIcon fileIcon(QStringLiteral(":/assets/file.png"));
 
   QFileInfo const & info = node->GetInfo();
-  QString path;
   if (info.isRoot())
     return rootIcon;
   else if (info.isDir())
@@ -163,9 +214,14 @@ public:
   {
     addField(bind(&getName, _1), "Name");
     addField(bind(&getSize, _1), "Size");
+    addField(bind(&getCreatedTime, _1), "Created");
+    addField(bind(&getModifiedTime, _1), "Modified");
+    addField(bind(&getOwner, _1), "Owner");
+    addField(bind(&getPremission, _1), "Permissions");
 
     m_stateGetters[Qt::CheckStateRole] = bind(&getCheckState, _1);
     m_stateGetters[Qt::DecorationRole] = bind(&getIcon, _1);
+    //m_stateGetters[Qt::TextAlignmentRole] = bind(&getTextAlign, _1);
   }
 
   int getFieldCount() const
@@ -285,28 +341,30 @@ static FieldHelper s_helper;
 
 FileSystemModel::FileSystemModel(QObject * parent)
   : TBase(parent)
-  , m_impl(new Impl())
+  , m_impl(new Impl(this))
 {
 }
 
 FileSystemModel::~FileSystemModel()
 {
+  cleanModel();
   m_impl.reset();
 }
 
 void FileSystemModel::setRoot(QString const & rootPath)
 {
   beginResetModel();
-  ROOT.reset();
-  if (QDir(rootPath).exists())
+  cleanModel();
+  QFileInfo info(rootPath);
+  if (!rootPath.isEmpty() && info.exists())
   {
-    ROOT.reset(new Node(QFileInfo(rootPath)));
-    setRootImpl(ROOT.get(), 0);
+    m_impl->m_root.reset(new Node(info));
+    m_impl->RunScaner(m_impl->m_root.get());
   }
   endResetModel();
 }
 
-bool FileSystemModel::isDir(QModelIndex const & index)
+bool FileSystemModel::isDir(QModelIndex const & index) const
 {
   return s_helper.isDir(static_cast<Node *>(index.internalPointer()));
 }
@@ -314,7 +372,7 @@ bool FileSystemModel::isDir(QModelIndex const & index)
 int FileSystemModel::rowCount(QModelIndex const & parent) const
 {
   if (!parent.isValid())
-    return ROOT ? 1 : 0;
+    return m_impl->m_root ? 1 : 0;
 
   Q_ASSERT(parent.internalPointer() != nullptr);
   Node * node = static_cast<Node *>(parent.internalPointer());
@@ -330,7 +388,7 @@ QModelIndex FileSystemModel::index(int row, int column, QModelIndex const & pare
 {
   Node * node = static_cast<Node *>(parent.internalPointer());
   if (node == nullptr)
-    return createIndex(row, column, ROOT.get());
+    return createIndex(row, column, m_impl->m_root.get());
 
   return createIndex(row, column, node->GetChild(row));
 }
@@ -345,7 +403,7 @@ QModelIndex FileSystemModel::parent(QModelIndex const & child) const
   if (parent == nullptr)
     return QModelIndex();
 
-  return createIndex(0, 0, parent);
+  return createIndex(parent->GetChildIndex(), 0, parent);
 }
 
 QVariant FileSystemModel::data(QModelIndex const & index, int role) const
@@ -393,9 +451,75 @@ Qt::ItemFlags FileSystemModel::flags(QModelIndex const & index) const
   return flags;
 }
 
+bool FileSystemModel::canFetchMore(QModelIndex const & parent) const
+{
+  if (!parent.isValid())
+    return false;
+
+  if (!isDir(parent))
+    return false;
+
+  Q_ASSERT(parent.internalPointer() != nullptr);
+  Node * node = static_cast<Node *>(parent.internalPointer());
+  if (node->GetStatus() == Node::Finished)
+    return false;
+
+  return true;
+}
+
+void FileSystemModel::fetchMore(QModelIndex const & parent)
+{
+  if (!parent.isValid())
+    return;
+
+  Q_ASSERT(parent.internalPointer() != nullptr);
+  Node * node = static_cast<Node *>(parent.internalPointer());
+  if (node->GetStatus() == Node::NotScaned)
+    m_impl->RunScaner(node);
+}
+
 void FileSystemModel::emitDataChanged(QModelIndex const & from, QModelIndex const & to, int role)
 {
   Q_ASSERT(from.parent() == to.parent());
   emit dataChanged(from, to, QVector<int>{ role });
+}
+
+void FileSystemModel::fileFounded(QFileInfo const & info, DirScaner * scaner)
+{
+  Impl::TScanerIndex::iterator nodeIter = m_impl->m_scanerIndex.find(scaner);
+  if (nodeIter == m_impl->m_scanerIndex.end())
+    return;
+
+  Node * fileNode = nodeIter->second;
+  Q_ASSERT(fileNode->GetStatus() == Node::Running);
+
+  QString fileName = info.fileName();
+  if (fileName != "." && fileName != "..")
+  {
+    int rowIndex = fileNode->GetChildCount();
+    beginInsertRows(createIndex(fileNode->GetChildIndex(), 0, fileNode), rowIndex, rowIndex);
+    fileNode->AddChild(info);
+    endInsertRows();
+  }
+}
+
+void FileSystemModel::scanFinished(DirScaner * scaner)
+{
+  Impl::TScanerIndex::iterator nodeIter = m_impl->m_scanerIndex.find(scaner);
+  if (nodeIter == m_impl->m_scanerIndex.end())
+    return;
+
+  nodeIter->second->SetStatus(Node::Finished);
+  m_impl->m_scanerIndex.erase(nodeIter);
+}
+
+void FileSystemModel::cleanModel()
+{
+  using TScanerNode = Impl::TScanerIndex::value_type;
+  for (TScanerNode & node : m_impl->m_scanerIndex)
+    node.first->cancel();
+
+  m_impl->m_scanerIndex.clear();
+  m_impl->m_root.reset();
 }
 
